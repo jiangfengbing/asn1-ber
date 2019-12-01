@@ -12,6 +12,7 @@ type Packet struct {
 	TagType     uint8
 	Tag         uint8
 	Value       interface{}
+	ByteValue   []byte
 	Data        *bytes.Buffer
 	Children    []*Packet
 	Description string
@@ -98,13 +99,13 @@ var ClassMap = map[uint8]string{
 }
 
 const (
-	TypePrimative   = 0  // xx0xxxxxb
+	TypePrimitive   = 0  // xx0xxxxxb
 	TypeConstructed = 32 // xx1xxxxxb
 	TypeBitmask     = 32 // xx1xxxxxb
 )
 
 var TypeMap = map[uint8]string{
-	TypePrimative:   "Primative",
+	TypePrimitive:   "Primative",
 	TypeConstructed: "Constructed",
 }
 
@@ -229,11 +230,8 @@ func ReadPacket(reader io.Reader) (*Packet, error) {
 	return p, nil
 }
 
-func DecodeString(data []byte) (ret string) {
-	for _, c := range data {
-		ret += fmt.Sprintf("%c", c)
-	}
-	return
+func DecodeString(data []byte) string {
+	return string(data)
 }
 
 func DecodeInteger(data []byte) (ret uint64) {
@@ -259,7 +257,14 @@ func EncodeInteger(val uint64) []byte {
 		shift -= 8
 		mask = mask >> 8
 	}
-	return out.Bytes()
+	byteSlice := out.Bytes()
+
+	// if first bit in first byte is 1 it is necessary to append a leading 00 byte to make signum clear
+	// otherwise it happens that a request with messageId => 02 01 80 get response with messageId => 02 04 FF FF FF 80
+	if len(byteSlice) > 0 && byteSlice[0]&byte(128) != 0 {
+		return append([]byte{0x00}, byteSlice...)
+	}
+	return byteSlice
 }
 
 func DecodePacket(data []byte) *Packet {
@@ -298,6 +303,8 @@ func decodePacket(data []byte) (*Packet, []byte) {
 		}
 	} else if p.ClassType == ClassUniversal {
 		p.Data.Write(data[datapos : datapos+datalen])
+		p.ByteValue = value_data
+
 		switch p.Tag {
 		case TagEOC:
 		case TagBoolean:
@@ -399,7 +406,7 @@ func Encode(ClassType, TagType, Tag uint8, Value interface{}, Description string
 }
 
 func NewSequence(Description string) *Packet {
-	return Encode(ClassUniversal, TypePrimative, TagSequence, nil, Description)
+	return Encode(ClassUniversal, TypePrimitive, TagSequence, nil, Description)
 }
 
 func NewBoolean(ClassType, TagType, Tag uint8, Value bool, Description string) *Packet {
